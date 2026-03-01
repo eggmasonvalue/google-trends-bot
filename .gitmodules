@@ -1,0 +1,3 @@
+[submodule "vendor/GoogleTrends-Scraper"]
+	path = vendor/GoogleTrends-Scraper
+	url = git@github.com:dballinari/GoogleTrends-Scraper.git
