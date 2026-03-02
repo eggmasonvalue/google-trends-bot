@@ -26,11 +26,8 @@ ALL_TIME_START = date(2004, 1, 1)
 ASCII_CHARSET = " .:-=+*#%@"
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-VENDOR_DIR = ROOT_DIR / "vendor" / "GoogleTrends-Scraper"
-if str(VENDOR_DIR) not in sys.path:
-    sys.path.insert(0, str(VENDOR_DIR))
 
-from src.GoogleTrendsScraper import GoogleTrendsScraper  # noqa: E402
+from .GoogleTrendsScraper import GoogleTrendsScraper
 
 
 @dataclass(frozen=True)

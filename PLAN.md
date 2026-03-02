@@ -5,7 +5,7 @@ Build a simple Python wrapper around `dballinari/GoogleTrends-Scraper` that fetc
 
 ## Confirmed Constraints and Decisions
 - Dependency management must use `uv`.
-- Upstream scraper is not pip-installable from Git (no `pyproject.toml`/`setup.py`), so we will include it as a git submodule.
+- Upstream scraper is not pip-installable from Git (no `pyproject.toml`/`setup.py`), so we copied its code directly into the repository, mitigating unhandled exceptions and infinite loops.
 - No local testing in this environment; implementation-only changes.
 - Add MIT license.
 - Include one additional period called `all_time` using explicit range:

@@ -14,11 +14,10 @@ Simple `uv`-managed wrapper around [`dballinari/GoogleTrends-Scraper`](https://g
 - Sends Discord embeds with key stats and ASCII trend snippets.
 
 ## Dependency Model
-The upstream scraper is included as a git submodule because it is not pip-installable from Git (`pyproject.toml` / `setup.py` not present upstream).
+The upstream scraper code has been copied directly into our repository (`src/trends_bot/GoogleTrendsScraper.py`) instead of using a git submodule. This allows us to modify it (e.g. handle 429 Too Many Requests, infinite loop fixes) without dealing with upstream unmaintained code issues.
 
 ## Local Setup
 ```bash
-git submodule update --init --recursive
 uv sync
 ```
 
