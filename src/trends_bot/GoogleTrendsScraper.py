@@ -467,6 +467,10 @@ class GoogleTrendsScraper:
                         continue
 
                 if not button:
+                    inner_html = line_chart.get_attribute("innerHTML")
+                    import sys
+                    print("LINE CHART INNER HTML:", file=sys.stderr)
+                    print(inner_html, file=sys.stderr)
                     raise exceptions.NoSuchElementException(f"Could not find export button with any selector in {selectors}")
                 button.click()
             except exceptions.NoSuchElementException as e:
