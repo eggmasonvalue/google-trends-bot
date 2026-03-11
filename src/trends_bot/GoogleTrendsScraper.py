@@ -436,19 +436,47 @@ class GoogleTrendsScraper:
                 time.sleep(self.sleep*(1+np.random.rand()) * retries)
 
                 # Check for 429 Too Many Requests
-                if "429. That’s an error" in self.browser.page_source or "Too Many Requests" in self.browser.title:
+                page_source = self.browser.page_source
+                page_title = self.browser.title
+                if "429" in page_source and "Too Many Requests" in page_source:
+                    raise RuntimeError("HTTP 429: Too Many Requests from Google Trends.")
+                if "Too Many Requests" in page_title:
                     raise RuntimeError("HTTP 429: Too Many Requests from Google Trends.")
 
                 # Try to find the button and click it
                 line_chart = self.browser.find_element(By.CSS_SELECTOR,
                     "widget[type='fe_line_chart']")
-                button = line_chart.find_element(By.CSS_SELECTOR,
-                    '.widget-actions-item.export')
+
+                # Google Trends changed UI, so try multiple selectors for the export button
+                selectors = [
+                    '.widget-actions-item.export',
+                    'button[aria-label="Export"]',
+                    'button[title="Export"]',
+                    '.export',
+                    '.widget-actions-item [title*="CSV"]'
+                ]
+                button = None
+                for selector in selectors:
+                    try:
+                        button = line_chart.find_element(By.CSS_SELECTOR, selector)
+                        break
+                    except exceptions.NoSuchElementException:
+                        continue
+
+                if not button:
+                    raise exceptions.NoSuchElementException(f"Could not find export button with any selector in {selectors}")
                 button.click()
             except exceptions.NoSuchElementException as e:
                 # If the button cannot be found, try again (load page, ...)
                 if retries >= max_retries:
-                    raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}")
+                    # Dump page source for debugging
+                    try:
+                        dump_path = self.download_path.name + f"/failed_page_{int(time.time())}.html"
+                        with open(dump_path, "w") as f:
+                            f.write(self.browser.page_source)
+                        raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}. Page source dumped to {dump_path}")
+                    except Exception as dump_e:
+                        raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}")
                 pass
             except RuntimeError as e:
                 # If 429 was raised, we either abort or wait longer. In CI we just want to fail and let Discord report it.
