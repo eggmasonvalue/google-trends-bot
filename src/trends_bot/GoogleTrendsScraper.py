@@ -449,16 +449,19 @@ class GoogleTrendsScraper:
 
                 # Google Trends changed UI, so try multiple selectors for the export button
                 selectors = [
-                    '.widget-actions-item.export',
-                    'button[aria-label="Export"]',
-                    'button[title="Export"]',
-                    '.export',
-                    '.widget-actions-item [title*="CSV"]'
+                    (By.CSS_SELECTOR, '.widget-actions-item.export'),
+                    (By.CSS_SELECTOR, 'button[aria-label="Export"]'),
+                    (By.CSS_SELECTOR, 'button[title="Export"]'),
+                    (By.CSS_SELECTOR, '.export'),
+                    (By.CSS_SELECTOR, '.widget-actions-item [title*="CSV"]'),
+                    (By.XPATH, '//button[.//i[contains(text(), "file_download")]]'),
+                    (By.XPATH, '//button[contains(., "file_download")]'),
+                    (By.XPATH, '//button[contains(@aria-label, "CSV")]'),
                 ]
                 button = None
-                for selector in selectors:
+                for by, selector in selectors:
                     try:
-                        button = line_chart.find_element(By.CSS_SELECTOR, selector)
+                        button = line_chart.find_element(by, selector)
                         break
                     except exceptions.NoSuchElementException:
                         continue
@@ -469,14 +472,18 @@ class GoogleTrendsScraper:
             except exceptions.NoSuchElementException as e:
                 # If the button cannot be found, try again (load page, ...)
                 if retries >= max_retries:
-                    # Dump page source for debugging
+                    # Dump page source for debugging to artifacts directory
+                    dump_path = "artifacts/failed_page.html"
                     try:
-                        dump_path = self.download_path.name + f"/failed_page_{int(time.time())}.html"
-                        with open(dump_path, "w") as f:
+                        import os
+                        artifacts_dir = os.path.join(os.getcwd(), "artifacts")
+                        os.makedirs(artifacts_dir, exist_ok=True)
+                        dump_path = os.path.join(artifacts_dir, f"failed_page_{int(time.time())}.html")
+                        with open(dump_path, "w", encoding="utf-8") as f:
                             f.write(self.browser.page_source)
-                        raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}. Page source dumped to {dump_path}")
                     except Exception as dump_e:
-                        raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}")
+                        raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}. Also failed to dump page source: {dump_e}")
+                    raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}. Page source dumped to {dump_path}")
                 pass
             except RuntimeError as e:
                 # If 429 was raised, we either abort or wait longer. In CI we just want to fail and let Discord report it.
