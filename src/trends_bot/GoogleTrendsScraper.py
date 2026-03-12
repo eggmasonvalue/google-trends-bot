@@ -474,17 +474,27 @@ class GoogleTrendsScraper:
                     import urllib.parse
 
                     # Extract rows from table
-                    rows = re.findall(r'<tr>(.*?)</tr>', inner_html, re.IGNORECASE)
+                    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', inner_html, re.IGNORECASE | re.DOTALL)
                     if not rows:
                         raise exceptions.NoSuchElementException("Could not find table data in the chart HTML")
 
                     parsed_data = []
                     for row in rows[1:]: # skip header
-                        cols = re.findall(r'<td>(.*?)</td>', row, re.IGNORECASE)
+                        cols = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
                         if len(cols) >= 2:
                             # Clean invisible unicode characters like \u202a and \u202c that Google adds
                             date_str = cols[0].replace('\u202a', '').replace('\u202c', '').strip()
-                            vals = [float(c) for c in cols[1:]]
+                            # remove any inner tags inside the td
+                            date_str = re.sub(r'<[^>]+>', '', date_str).strip()
+
+                            vals = []
+                            for c in cols[1:]:
+                                c_clean = re.sub(r'<[^>]+>', '', c).strip()
+                                try:
+                                    vals.append(float(c_clean))
+                                except ValueError:
+                                    vals.append(0.0)
+
                             parsed_data.append({'Date': date_str, **{f'y{i+1}': v for i, v in enumerate(vals)}})
 
                     if not parsed_data:
