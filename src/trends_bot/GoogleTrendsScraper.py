@@ -467,11 +467,67 @@ class GoogleTrendsScraper:
                         continue
 
                 if not button:
+                    # Export button not found, extract data directly from the DOM table as a fallback
                     inner_html = line_chart.get_attribute("innerHTML")
-                    import sys
-                    print("LINE CHART INNER HTML:", file=sys.stderr)
-                    print(inner_html, file=sys.stderr)
-                    raise exceptions.NoSuchElementException(f"Could not find export button with any selector in {selectors}")
+
+                    import re
+                    import urllib.parse
+
+                    # Extract rows from table
+                    rows = re.findall(r'<tr>(.*?)</tr>', inner_html, re.IGNORECASE)
+                    if not rows:
+                        raise exceptions.NoSuchElementException("Could not find table data in the chart HTML")
+
+                    parsed_data = []
+                    for row in rows[1:]: # skip header
+                        cols = re.findall(r'<td>(.*?)</td>', row, re.IGNORECASE)
+                        if len(cols) >= 2:
+                            # Clean invisible unicode characters like \u202a and \u202c that Google adds
+                            date_str = cols[0].replace('\u202a', '').replace('\u202c', '').strip()
+                            vals = [float(c) for c in cols[1:]]
+                            parsed_data.append({'Date': date_str, **{f'y{i+1}': v for i, v in enumerate(vals)}})
+
+                    if not parsed_data:
+                        raise exceptions.NoSuchElementException("Could not extract any rows from table")
+
+                    data = pd.DataFrame(parsed_data)
+                    data['Date'] = pd.to_datetime(data['Date'])
+                    data = data.set_index('Date')
+
+                    # Determine frequency
+                    if len(data) >= 2:
+                        diff = (data.index[1] - data.index[0]).days
+                        if diff == 1:
+                            frequency = 'Daily'
+                        elif diff == 7:
+                            frequency = 'Weekly'
+                        else:
+                            frequency = 'Monthly'
+                    else:
+                        frequency = 'Monthly'
+
+                    # Rename columns to match the keywords from the URL
+                    parsed_url = urllib.parse.urlparse(url)
+                    query_params = urllib.parse.parse_qs(parsed_url.query)
+                    keywords = []
+                    if 'q' in query_params:
+                        keywords = query_params['q'][0].split(',')
+
+                    # Rename y1, y2, etc. to keywords
+                    col_mapping = {}
+                    for i, kw in enumerate(keywords):
+                        col_mapping[f'y{i+1}'] = kw
+                    data = data.rename(columns=col_mapping)
+
+                    # If column starts with y, drop it (unmatched)
+                    cols_to_drop = [c for c in data.columns if c.startswith('y') and c[1:].isdigit()]
+                    if cols_to_drop:
+                        data = data.drop(columns=cols_to_drop)
+
+                    # Return data successfully extracted from HTML!
+                    return data, frequency
+
+                # If button exists, use the classic CSV download
                 button.click()
             except exceptions.NoSuchElementException as e:
                 # If the button cannot be found, try again (load page, ...)
@@ -486,13 +542,14 @@ class GoogleTrendsScraper:
                         with open(dump_path, "w", encoding="utf-8") as f:
                             f.write(self.browser.page_source)
                     except Exception as dump_e:
-                        raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}. Also failed to dump page source: {dump_e}")
-                    raise RuntimeError(f"Could not find export button after {max_retries} retries: {e}. Page source dumped to {dump_path}")
+                        raise RuntimeError(f"Could not find export button or table after {max_retries} retries: {e}. Also failed to dump page source: {dump_e}")
+                    raise RuntimeError(f"Could not find export button or table after {max_retries} retries: {e}. Page source dumped to {dump_path}")
                 pass
             except RuntimeError as e:
                 # If 429 was raised, we either abort or wait longer. In CI we just want to fail and let Discord report it.
                 if retries >= max_retries:
                     raise e
+
         # After downloading, wait again to allow the file to be downloaded
         time.sleep(self.sleep*(1+np.random.rand()))
         # Load the data from the csv-file as pandas.DataFrame object
@@ -510,6 +567,7 @@ class GoogleTrendsScraper:
             data.Month = pd.to_datetime(data.Month)
             data = data.set_index("Month")
             frequency = 'Monthly'
+
         # Sleep again
         time.sleep(self.sleep*(1+np.random.rand()))
         # Delete the file
@@ -518,6 +576,19 @@ class GoogleTrendsScraper:
                 os.remove(self.filename)
             except:
                 pass
+
+        # To make it consistent with HTML extraction, also extract the keyword from URL and rename columns
+        import urllib.parse
+        parsed_url = urllib.parse.urlparse(url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        if 'q' in query_params:
+            keywords = query_params['q'][0].split(',')
+            # CSV usually has one column per keyword, skipping 'Day' etc.
+            # E.g. ['Day', 'multibagger stock: (India)']
+            # We just rename the data columns to keywords
+            if len(data.columns) == len(keywords):
+                data.columns = keywords
+
         return data, frequency
 
     def go_to_url(self, url):
