@@ -470,39 +470,31 @@ class GoogleTrendsScraper:
                     # Export button not found, extract data directly from the DOM table as a fallback
                     inner_html = line_chart.get_attribute("innerHTML")
 
-                    import re
                     import urllib.parse
+                    import io
 
-                    # Extract rows from table
-                    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', inner_html, re.IGNORECASE | re.DOTALL)
-                    if not rows:
-                        raise exceptions.NoSuchElementException("Could not find table data in the chart HTML")
+                    # Extract table using pd.read_html
+                    try:
+                        dfs = pd.read_html(io.StringIO(inner_html))
+                        if not dfs:
+                            raise exceptions.NoSuchElementException("pd.read_html returned no tables")
+                        data = dfs[0]
+                        # Assume first column is date and the rest are values
+                        date_col = data.columns[0]
 
-                    parsed_data = []
-                    for row in rows[1:]: # skip header
-                        cols = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
-                        if len(cols) >= 2:
-                            # Clean invisible unicode characters like \u202a and \u202c that Google adds
-                            date_str = cols[0].replace('\u202a', '').replace('\u202c', '').strip()
-                            # remove any inner tags inside the td
-                            date_str = re.sub(r'<[^>]+>', '', date_str).strip()
+                        # Clean date strings from invisible directional marks that Google injects
+                        data[date_col] = data[date_col].astype(str).str.replace('\u202a', '', regex=False).str.replace('\u202c', '', regex=False).str.strip()
 
-                            vals = []
-                            for c in cols[1:]:
-                                c_clean = re.sub(r'<[^>]+>', '', c).strip()
-                                try:
-                                    vals.append(float(c_clean))
-                                except ValueError:
-                                    vals.append(0.0)
+                        # Parse dates and set index
+                        data['Date'] = pd.to_datetime(data[date_col])
+                        data = data.drop(columns=[date_col])
+                        data = data.set_index('Date')
 
-                            parsed_data.append({'Date': date_str, **{f'y{i+1}': v for i, v in enumerate(vals)}})
-
-                    if not parsed_data:
-                        raise exceptions.NoSuchElementException("Could not extract any rows from table")
-
-                    data = pd.DataFrame(parsed_data)
-                    data['Date'] = pd.to_datetime(data['Date'])
-                    data = data.set_index('Date')
+                        # Convert all columns to numeric, coercing errors
+                        for col in data.columns:
+                            data[col] = pd.to_numeric(data[col], errors='coerce').fillna(0.0)
+                    except Exception as parse_e:
+                        raise exceptions.NoSuchElementException(f"Could not parse table data from chart HTML: {parse_e}")
 
                     # Determine frequency
                     if len(data) >= 2:
