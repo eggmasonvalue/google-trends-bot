@@ -21,22 +21,16 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
 
-      - name: Install Chromium and chromedriver
-        run: |
-          set -eux
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver || sudo apt-get install -y chromium chromium-driver
-
       - name: Install dependencies
         run: uv sync
 
       - name: Run trends bot
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          set -eux
-          export CHROMEDRIVER="$(command -v chromedriver || command -v chromium-chromedriver)"
-          uv run trends-bot
+          TRENDS_KEYWORD: ${{ vars.TRENDS_KEYWORD || 'multibagger stock' }}
+          TRENDS_GEO: ${{ vars.TRENDS_GEO || 'IN' }}
+          TRENDS_CATEGORY: ${{ vars.TRENDS_CATEGORY || '7' }}
+        run: uv run trends-bot
 
       - name: Upload artifacts
         if: always()

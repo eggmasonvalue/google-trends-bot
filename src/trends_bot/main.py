@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-import sys
 import traceback
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -18,16 +18,22 @@ import numpy as np
 import pandas as pd
 import requests
 
+from .trends_client import fetch_all_periods
 
-KEYWORD = "multibagger stock"
-GEO = "IN"
-CATEGORY = 7
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+KEYWORD: str = os.getenv("TRENDS_KEYWORD", "multibagger stock")
+GEO: str = os.getenv("TRENDS_GEO", "IN")
+CATEGORY: int = int(os.getenv("TRENDS_CATEGORY", "7"))
 ALL_TIME_START = date(2004, 1, 1)
 ASCII_CHARSET = " .:-=+*#%@"
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-
-from .GoogleTrendsScraper import GoogleTrendsScraper
 
 
 @dataclass(frozen=True)
@@ -88,27 +94,11 @@ def summarize_series(series: pd.Series) -> Dict[str, float]:
     }
 
 
-def fetch_period_data(scraper: GoogleTrendsScraper, period: Period) -> pd.Series:
-    frame = scraper.get_trends(
-        KEYWORD,
-        period.start.strftime("%Y-%m-%d"),
-        period.end.strftime("%Y-%m-%d"),
-        region=GEO,
-        category=CATEGORY,
-    )
-    if KEYWORD not in frame.columns:
-        raise RuntimeError(f"Keyword column missing for period: {period.name}")
-    data = frame[KEYWORD].copy()
-    data.index = pd.to_datetime(data.index)
-    data = data.sort_index()
-    return data
-
-
 def plot_short_term(series: pd.Series, output_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(10, 4.5), dpi=140)
     ax.plot(series.index, series.values, color="#0f766e", linewidth=2.2)
     ax.fill_between(series.index, series.values, color="#14b8a6", alpha=0.20)
-    ax.set_title("Google Trends: multibagger stock (India) - Short Term", fontsize=12)
+    ax.set_title(f"Google Trends: {KEYWORD} ({GEO}) – Short Term", fontsize=12)
     ax.set_ylabel("Trend Index (0-100)")
     ax.grid(alpha=0.25)
     fig.autofmt_xdate()
@@ -131,7 +121,7 @@ def plot_context(data_by_period: Dict[str, pd.Series], output_path: Path) -> Non
         ax.grid(alpha=0.25)
         ax.set_ylabel("0-100")
     axes[-1].set_xlabel("Date")
-    fig.suptitle("Google Trends Context: multibagger stock (India)", fontsize=13)
+    fig.suptitle(f"Google Trends Context: {KEYWORD} ({GEO})", fontsize=13)
     fig.tight_layout()
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
@@ -159,8 +149,8 @@ def build_embeds(
         stats_lines.append(f"`{sparklines[key]}`")
 
     short_embed = {
-        "title": "India Google Trends Weekly Check",
-        "description": "Keyword: `multibagger stock`\n\n" + "\n".join(stats_lines),
+        "title": f"{GEO} Google Trends Weekly Check",
+        "description": f"Keyword: `{KEYWORD}`\n\n" + "\n".join(stats_lines),
         "color": 0x0F766E,
         "timestamp": run_time.isoformat(),
         "image": {"url": "attachment://short_term.png"},
@@ -205,7 +195,7 @@ def post_discord_failure(webhook_url: str, run_time: datetime, error_text: str) 
     payload = {
         "embeds": [
             {
-                "title": "India Google Trends Weekly Check Failed",
+                "title": f"{GEO} Google Trends Weekly Check – Failed",
                 "description": f"```\n{error_text[:1800]}\n```",
                 "color": 0xB91C1C,
                 "timestamp": run_time.isoformat(),
@@ -230,16 +220,15 @@ def run() -> None:
     short_chart = output_dir / "short_term.png"
     context_chart = output_dir / "context.png"
 
-    scraper = GoogleTrendsScraper(
-        sleep=int(os.getenv("SCRAPER_SLEEP", "3")),
-        path_driver=os.getenv("CHROMEDRIVER"),
-        headless=True,
+    logger.info(
+        "Starting trends run: keyword=%r geo=%s category=%d",
+        KEYWORD, GEO, CATEGORY,
     )
 
     try:
-        data_by_period: Dict[str, pd.Series] = {}
-        for period in periods:
-            data_by_period[period.name] = fetch_period_data(scraper, period)
+        data_by_period: Dict[str, pd.Series] = fetch_all_periods(
+            periods, KEYWORD, GEO, CATEGORY
+        )
 
         summaries = {name: summarize_series(series) for name, series in data_by_period.items()}
         sparklines = {name: to_ascii_sparkline(series) for name, series in data_by_period.items()}
@@ -249,12 +238,12 @@ def run() -> None:
 
         embeds = build_embeds(run_time, summaries, sparklines)
         post_discord_webhook(webhook_url, embeds, [short_chart, context_chart])
+        logger.info("Successfully posted to Discord.")
     except Exception:
         error_text = traceback.format_exc()
+        logger.error("Run failed:\n%s", error_text)
         post_discord_failure(webhook_url, run_time, error_text)
         raise
-    finally:
-        del scraper
 
 
 def main() -> None:
