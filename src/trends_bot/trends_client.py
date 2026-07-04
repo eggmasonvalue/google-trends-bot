@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+
 # Seconds to sleep between consecutive period fetches (uniform jitter)
 _MIN_INTER_REQUEST_SLEEP = 5
 _MAX_INTER_REQUEST_SLEEP = 15
@@ -85,8 +87,10 @@ def fetch_interest_over_time(
 
     Returns a pandas Series indexed by date, with float values 0-100.
 
-    Retries up to 5 times with exponential backoff + jitter on any exception
-    (covers 429 rate-limits, transient network errors, empty responses).
+    Retries up to 5 times with exponential backoff + jitter on transient
+    errors (429 rate-limits, network errors, timeouts).  A definitively
+    empty response raises _NoDataError which is NOT retried — callers that
+    want to skip no-data windows should catch it explicitly.
     """
     pytrend = _build_trend_req()
     pytrend.build_payload(
@@ -101,7 +105,7 @@ def fetch_interest_over_time(
         raise RuntimeError(
             f"Empty response from Google Trends for keyword='{keyword}', "
             f"timeframe='{timeframe}', geo='{geo}', category={category}. "
-            "This may be a rate-limit or a keyword with no data."
+            "This may be a rate-limit; all retries exhausted."
         )
 
     # Drop the 'isPartial' flag column added by pytrends
@@ -189,8 +193,8 @@ def fetch_all_time_weekly(
     logger.info("Fetching all-time monthly anchor...")
     anchor_raw = fetch_interest_over_time(keyword, "all", geo, category)
     anchor_monthly = anchor_raw.resample("MS").mean().astype(float)
-    sleep_s = random.uniform(_MIN_INTER_REQUEST_SLEEP, _MAX_INTER_REQUEST_SLEEP)
-    logger.debug("Sleeping %.1fs after anchor fetch", sleep_s)
+    sleep_s = random.uniform(30, 60)
+    logger.info("Sleeping %.1fs after anchor fetch (rate-limit buffer)", sleep_s)
     time.sleep(sleep_s)
 
     # Step 2: build chunk date ranges
@@ -215,7 +219,17 @@ def fetch_all_time_weekly(
         timeframe = f"{cs.strftime('%Y-%m-%d')} {ce.strftime('%Y-%m-%d')}"
         logger.info("  chunk %d/%d: %s", i + 1, len(chunk_ranges), timeframe)
 
-        raw = fetch_interest_over_time(keyword, timeframe, geo, category)
+        try:
+            raw = fetch_interest_over_time(keyword, timeframe, geo, category)
+        except Exception as exc:
+            logger.warning(
+                "  chunk %d/%d (%s): all retries exhausted (%s) — skipping.",
+                i + 1, len(chunk_ranges), timeframe, exc,
+            )
+            if i < len(chunk_ranges) - 1:
+                sleep_s = random.uniform(_MIN_INTER_REQUEST_SLEEP, _MAX_INTER_REQUEST_SLEEP)
+                time.sleep(sleep_s)
+            continue
         scaled = _scale_chunk_to_anchor(raw, anchor_monthly)
 
         if combined is None:
