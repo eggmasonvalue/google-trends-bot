@@ -1,4 +1,4 @@
-# Google Trends Bot
+# Google Trends Bot - STATE: ABANDONED. WILL USE GEMINI SPARK/OTHER ALWAYS-ON AGENTS TO ACCOMPLISH THIS TASK.
 Google Trends → Discord webhook. Fetches multi-horizon trend data weekly and posts charts + stats to a Discord channel.
 
 ---
